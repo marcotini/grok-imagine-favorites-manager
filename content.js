@@ -161,24 +161,89 @@ function checkVideoExists(url) {
 }
 
 /**
- * Handles media download requests
+ * Scrolls down the page to load all lazy-loaded content and collects media
  * @param {string} type - Type of download (saveImages, saveVideos, saveBoth)
+ * @returns {Promise<Array>} Array of media items
  */
-async function handleSave(type) {
-  console.log(`Starting handleSave with type: ${type}`);
-  const media = [];
-  const seen = new Set();
+async function scrollAndCollectMedia(type) {
+  console.log('Starting scroll to load and collect all content...');
   
-  const cards = document.querySelectorAll(SELECTORS.CARD);
+  // Find the scrollable container
+  let scrollContainer = document.documentElement;
+  const possibleContainers = [
+    document.querySelector('main'),
+    document.querySelector('[role="main"]'),
+    document.querySelector('.overflow-y-auto'),
+    document.querySelector('.overflow-auto'),
+    ...Array.from(document.querySelectorAll('div')).filter(el => {
+      const style = window.getComputedStyle(el);
+      return style.overflowY === 'auto' || style.overflowY === 'scroll';
+    })
+  ].filter(el => el !== null);
   
-  if (cards.length === 0) {
-    throw new Error('No media cards found. Make sure you are on the favorites page.');
+  if (possibleContainers.length > 0) {
+    scrollContainer = possibleContainers.reduce((tallest, current) => {
+      return current.scrollHeight > tallest.scrollHeight ? current : tallest;
+    });
+    console.log('Found custom scroll container:', scrollContainer);
   }
   
-  // Show progress message
-  const totalCards = cards.length;
-  let processedCards = 0;
-  console.log(`Found ${totalCards} cards to process`);
+  const media = [];
+  const seen = new Set();
+  let lastCardCount = 0;
+  let unchangedCount = 0;
+  const maxUnchangedAttempts = 5;
+  
+  // Get viewport height for relative scrolling
+  const viewportHeight = window.innerHeight;
+  console.log(`Viewport height: ${viewportHeight}px`);
+  
+  while (unchangedCount < maxUnchangedAttempts) {
+    // Collect media from currently visible cards
+    await collectMediaFromVisibleCards(type, media, seen);
+    
+    const currentCardCount = document.querySelectorAll(SELECTORS.CARD).length;
+    console.log(`Current cards: ${currentCardCount}, Collected media: ${media.length}, Last: ${lastCardCount}`);
+    
+    if (currentCardCount === lastCardCount) {
+      unchangedCount++;
+      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+    } else {
+      unchangedCount = 0;
+      lastCardCount = currentCardCount;
+      console.log(`New cards found! Total now: ${currentCardCount}`);
+    }
+    
+    // Scroll down by viewport height
+    const currentScroll = scrollContainer.scrollTop;
+    const newScroll = currentScroll + viewportHeight;
+    scrollContainer.scrollTop = newScroll;
+    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  
+  // One final collection pass
+  await collectMediaFromVisibleCards(type, media, seen);
+  
+  // Scroll back to top
+  console.log('Scrolling back to top');
+  scrollContainer.scrollTop = 0;
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  console.log(`Finished! Total media collected: ${media.length}`);
+  return media;
+}
+
+/**
+ * Collects media from currently loaded cards
+ * @param {string} type - Type of download
+ * @param {Array} media - Array to add media to
+ * @param {Set} seen - Set of already seen URLs
+ */
+async function collectMediaFromVisibleCards(type, media, seen) {
+  const cards = document.querySelectorAll(SELECTORS.CARD);
   
   for (const card of cards) {
     let imageName = null;
@@ -187,7 +252,6 @@ async function handleSave(type) {
     const img = card.querySelector(SELECTORS.IMAGE);
     if (img && img.src) {
       const url = img.src.split('?')[0];
-      // derive a better filename for endpoints that return generic names like 'content'
       const filename = determineFilename(url, null, false);
       imageName = extractBaseName(url);
 
@@ -204,54 +268,55 @@ async function handleSave(type) {
       const video = card.querySelector(SELECTORS.VIDEO);
       if (video && video.src) {
         const url = video.src.split('?')[0];
-        console.log(`Found video: ${url}`);
         if (!seen.has(url)) {
           seen.add(url);
           
-          // Use matching image name if available and looks like a UUID, otherwise derive from video URL
           const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
           const filename = (imageName && uuidRe.test(imageName)) ? `${imageName}.mp4` : determineFilename(url, imageName || null, true);
 
-          // Add SD video with full URL (including query params for cache busting)
           media.push({ url: video.src, filename });
-          console.log(`Added SD video: ${filename}`);
           
-          // Try to add HD version - check if it exists first
+          // Check for HD version
           if (url.includes('generated_video.mp4')) {
-            // Construct HD URL from SD URL
             const hdUrl = video.src.replace('generated_video.mp4', 'generated_video_hd.mp4');
             const hdFilename = filename.replace(/(\.[^.]+)$/, '-HD$1');
             
             if (!seen.has(hdUrl)) {
-              console.log(`Checking if HD video exists: ${hdUrl}`);
               const hdExists = await checkVideoExists(hdUrl);
-              
               if (hdExists) {
                 seen.add(hdUrl);
                 media.push({ url: hdUrl, filename: hdFilename });
-                console.log(`✓ HD video exists, added: ${hdFilename}`);
-              } else {
-                console.log(`✗ HD video does not exist, skipping: ${hdFilename}`);
               }
             }
-          } else {
-            console.log(`Video URL doesn't match generated_video.mp4 pattern: ${url}`);
           }
         }
       }
     }
-    
-    processedCards++;
-    if (processedCards % 10 === 0) {
-      console.log(`Processed ${processedCards}/${totalCards} cards...`);
-    }
+  }
+}
+
+/**
+ * Handles media download requests
+ * @param {string} type - Type of download (saveImages, saveVideos, saveBoth)
+ */
+async function handleSave(type) {
+  console.log(`Starting handleSave with type: ${type}`);
+  
+  // Check if we're on the favorites page
+  const cards = document.querySelectorAll(SELECTORS.CARD);
+  if (cards.length === 0) {
+    throw new Error('No media cards found. Make sure you are on the favorites page.');
   }
   
-  console.log(`Total media items collected: ${media.length}`);
+  // Scroll and collect all media
+  alert('Scrolling to load all favorites... Please wait.');
+  const media = await scrollAndCollectMedia(type);
   
   if (media.length === 0) {
     throw new Error('No media found matching the selected criteria.');
   }
+  
+  alert(`Collected ${media.length} items. Starting downloads...`);
   
   // Send to background script for download
   chrome.runtime.sendMessage({ 
