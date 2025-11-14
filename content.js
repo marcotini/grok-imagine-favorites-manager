@@ -20,6 +20,8 @@ const TIMING = {
   UNFAVORITE_DELAY: 300 // ms between unfavorite clicks
 };
 
+
+
 /**
  * Message listener for actions from popup
  */
@@ -37,6 +39,61 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     alert(`Error: ${error.message}`);
   }
 });
+
+/**
+ * Determine a sensible filename for a URL. If the final path segment has an extension, use it.
+ * If the final segment is a generic endpoint (e.g. "content"), look for a UUID segment earlier
+ * in the path and use that as the base name. If nothing found, fall back to a timestamped name.
+ * @param {string} url
+ * @param {string|null} fallbackBase - optional base name to use if no UUID found
+ * @param {boolean} isVideo
+ * @returns {string} filename with extension
+ */
+function determineFilename(url, fallbackBase = null, isVideo = false) {
+  try {
+    const parsed = new URL(url);
+    const segments = parsed.pathname.split('/').filter(Boolean);
+    const last = segments.length ? segments[segments.length - 1] : '';
+
+    // Prefer a UUID-like segment anywhere in the path (common in these assets).
+    // If found, use it as the base name and adopt the last segment's extension if present,
+    // otherwise fall back to a sensible extension (.mp4/.png).
+    const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i];
+      if (uuidRe.test(seg)) {
+        // determine extension: prefer last segment's extension if any
+        const lastExtMatch = (segments[segments.length - 1] || '').match(/(\.[a-zA-Z0-9]{1,5})$/);
+        const ext = lastExtMatch ? lastExtMatch[1] : (isVideo ? '.mp4' : '.png');
+        return `${seg}${ext}`;
+      }
+    }
+
+    // If no UUID found, but last segment contains an extension, return it directly
+    if (/\.[a-zA-Z0-9]{1,5}$/.test(last)) {
+      return last;
+    }
+
+    // Use fallbackBase if provided
+    if (fallbackBase) {
+      const ext = isVideo ? '.mp4' : '.png';
+      return `${fallbackBase}${ext}`;
+    }
+
+    // If last is not just 'content', use it (append extension)
+    if (last && last.toLowerCase() !== 'content') {
+      const ext = isVideo ? '.mp4' : '.png';
+      return `${last}${ext}`;
+    }
+
+    // Last resort: timestamped filename
+    const ext = isVideo ? '.mp4' : '.png';
+    return `${isVideo ? 'video' : 'image'}_${Date.now()}${ext}`;
+  } catch (e) {
+    const ext = isVideo ? '.mp4' : '.png';
+    return `${isVideo ? 'video' : 'image'}_${Date.now()}${ext}`;
+  }
+}
 
 /**
  * Extracts the base filename without extension from a URL
@@ -79,9 +136,10 @@ function handleSave(type) {
     const img = card.querySelector(SELECTORS.IMAGE);
     if (img && img.src) {
       const url = img.src.split('?')[0];
-      const filename = url.substring(url.lastIndexOf('/') + 1);
+      // derive a better filename for endpoints that return generic names like 'content'
+      const filename = determineFilename(url, null, false);
       imageName = extractBaseName(url);
-      
+
       if ((type === 'saveImages' || type === 'saveBoth') && 
           !seen.has(url) && 
           isValidUrl(url, URL_PATTERNS.IMAGE)) {
@@ -90,7 +148,7 @@ function handleSave(type) {
       }
     }
     
-    // Extract video
+  // Extract video
     if (type === 'saveVideos' || type === 'saveBoth') {
       const video = card.querySelector(SELECTORS.VIDEO);
       if (video && video.src) {
@@ -98,11 +156,10 @@ function handleSave(type) {
         if (!seen.has(url)) {
           seen.add(url);
           
-          // Use matching image name or fallback to original
-          const filename = imageName 
-            ? `${imageName}.mp4` 
-            : url.split('/').pop();
-          
+          // Use matching image name if available and looks like a UUID, otherwise derive from video URL
+          const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+          const filename = (imageName && uuidRe.test(imageName)) ? `${imageName}.mp4` : determineFilename(url, imageName || null, true);
+
           media.push({ url: video.src, filename });
         }
       }

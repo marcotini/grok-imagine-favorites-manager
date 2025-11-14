@@ -21,6 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
   
   // Utility actions
   document.getElementById('viewDownloads').addEventListener('click', openDownloadsPage);
+  document.getElementById('downloadSettings').addEventListener('click', openDownloadSettings);
   
   // Start progress tracking
   setInterval(updateProgress, UPDATE_INTERVAL);
@@ -51,6 +52,14 @@ function sendAction(action) {
  */
 function openDownloadsPage() {
   chrome.tabs.create({ url: 'chrome://downloads/' });
+}
+
+/**
+ * Opens the browser's downloads settings page so the user can disable
+ * "Ask where to save each file before downloading" which forces prompts.
+ */
+function openDownloadSettings() {
+  chrome.tabs.create({ url: 'chrome://settings/downloads' });
 }
 
 /**
