@@ -20,11 +20,13 @@ const TIMING = {
   NAVIGATION_DELAY: 500,
   UNFAVORITE_DELAY: 150, // Reduced since we're using API calls
   POST_LOAD_DELAY: 1000,
-  POST_UNFAVORITE_DELAY: 1000
+  POST_UNFAVORITE_DELAY: 1000,
+  UPSCALE_TIMEOUT: 30000 // 30 seconds for upscale processing
 };
 
 const API = {
-  UNLIKE_ENDPOINT: 'https://grok.com/rest/media/post/unlike'
+  UNLIKE_ENDPOINT: 'https://grok.com/rest/media/post/unlike',
+  UPSCALE_ENDPOINT: 'https://grok.com/rest/media/video/upscale'
 };
 
 /**
@@ -48,6 +50,51 @@ async function unlikePost(postId) {
   } catch (error) {
     console.error(`Failed to unlike post ${postId}:`, error);
     return false;
+  }
+}
+
+/**
+ * Attempts to upscale a video by its video ID
+ * @param {string} videoId - The video ID to upscale
+ * @returns {Promise<boolean>} - True if upscale request was accepted
+ */
+async function upscaleVideo(videoId) {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), TIMING.UPSCALE_TIMEOUT);
+    
+    const response = await fetch(API.UPSCALE_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': '*/*',
+      },
+      credentials: 'include',
+      body: JSON.stringify({ videoId }),
+      signal: controller.signal
+    });
+    
+    clearTimeout(timeoutId);
+    return response.ok;
+  } catch (error) {
+    // Silently fail as requested - upscale may not be available for all videos
+    console.log(`Upscale attempt for ${videoId} did not succeed:`, error.message);
+    return false;
+  }
+}
+
+/**
+ * Extracts video ID from video URL
+ * @param {string} videoUrl - The video URL
+ * @returns {string|null} - The video ID or null
+ */
+function extractVideoId(videoUrl) {
+  try {
+    // URL format: https://assets.grok.com/users/.../generated/{videoId}/generated_video.mp4
+    const match = videoUrl.match(/\/generated\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\//);
+    return match ? match[1] : null;
+  } catch (e) {
+    return null;
   }
 }
 
@@ -222,7 +269,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       // Mark operation as active
       chrome.storage.local.set({ activeOperation: true });
       
-      if (action.startsWith('save')) {
+      if (action === 'upscaleVideos') {
+        await handleUpscale();
+      } else if (action.startsWith('save')) {
         await handleSave(action);
       } else if (action.startsWith('unsave')) {
         handleUnsave(action);
@@ -552,6 +601,106 @@ async function scrollToLoadAll() {
 }
 
 /**
+ * Scrolls and collects video IDs that need upscaling (no HD version exists)
+ * @returns {Promise<Array<string>>} Array of video IDs to upscale
+ */
+async function scrollAndCollectVideosForUpscale() {
+  console.log('Starting scroll to collect videos for upscaling...');
+  
+  // Find the scrollable container
+  let scrollContainer = document.documentElement;
+  const possibleContainers = [
+    document.querySelector('main'),
+    document.querySelector('[role="main"]'),
+    document.querySelector('.overflow-y-auto'),
+    document.querySelector('.overflow-auto'),
+    ...Array.from(document.querySelectorAll('div')).filter(el => {
+      const style = window.getComputedStyle(el);
+      return style.overflowY === 'auto' || style.overflowY === 'scroll';
+    })
+  ].filter(el => el !== null);
+  
+  if (possibleContainers.length > 0) {
+    scrollContainer = possibleContainers.reduce((tallest, current) => {
+      return current.scrollHeight > tallest.scrollHeight ? current : tallest;
+    });
+    console.log('Found custom scroll container:', scrollContainer);
+  }
+  
+  const videoIds = [];
+  const seen = new Set();
+  let lastCardCount = 0;
+  let unchangedCount = 0;
+  const maxUnchangedAttempts = 5;
+  
+  const viewportHeight = window.innerHeight;
+  console.log(`Viewport height: ${viewportHeight}px`);
+  
+  while (unchangedCount < maxUnchangedAttempts) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log('Collection cancelled by user');
+      throw new Error('Operation cancelled by user');
+    }
+    
+    // Collect video IDs from currently visible cards
+    const cards = document.querySelectorAll(SELECTORS.CARD);
+    for (const card of cards) {
+      const video = card.querySelector(SELECTORS.VIDEO);
+      if (video && video.src) {
+        const url = video.src.split('?')[0];
+        if (!seen.has(url) && url.includes('generated_video.mp4')) {
+          seen.add(url);
+          
+          // Check if HD version already exists
+          const hdUrl = video.src.replace('generated_video.mp4', 'generated_video_hd.mp4');
+          const hdExists = await checkVideoExists(hdUrl);
+          
+          if (!hdExists) {
+            const videoId = extractVideoId(video.src);
+            if (videoId) {
+              videoIds.push(videoId);
+            }
+          }
+        }
+      }
+    }
+    
+    const currentCardCount = cards.length;
+    console.log(`Current cards: ${currentCardCount}, Videos to upscale: ${videoIds.length}, Last: ${lastCardCount}`);
+    
+    const scrollProgress = Math.min(10, (unchangedCount / maxUnchangedAttempts) * 10);
+    ProgressModal.update(scrollProgress, `Collecting videos... Found ${videoIds.length} to upscale`);
+    
+    if (currentCardCount === lastCardCount) {
+      unchangedCount++;
+      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+    } else {
+      unchangedCount = 0;
+      lastCardCount = currentCardCount;
+      console.log(`New cards found! Videos to upscale: ${videoIds.length}`);
+    }
+    
+    // Scroll down by viewport height
+    const currentScroll = scrollContainer.scrollTop;
+    const newScroll = currentScroll + viewportHeight;
+    scrollContainer.scrollTop = newScroll;
+    console.log(`Scrolled from ${currentScroll} to ${scrollContainer.scrollTop}`);
+    
+    // Wait for content to load
+    await new Promise(resolve => setTimeout(resolve, 1500));
+  }
+  
+  // Scroll back to top
+  console.log('Scrolling back to top');
+  scrollContainer.scrollTop = 0;
+  await new Promise(resolve => setTimeout(resolve, 500));
+  
+  console.log(`Finished! Total videos to upscale: ${videoIds.length}`);
+  return videoIds;
+}
+
+/**
  * Scrolls down the page to load all lazy-loaded content and collects media
  * @param {string} type - Type of download (saveImages, saveVideos, saveBoth)
  * @returns {Promise<Array>} Array of media items
@@ -603,9 +752,9 @@ async function scrollAndCollectMedia(type) {
     }
     
     // Collect media from currently visible cards
-    await collectMediaFromVisibleCards(type, media, seen);
-    
     const currentCardCount = document.querySelectorAll(SELECTORS.CARD).length;
+    await collectMediaFromVisibleCards(type, media, seen, media.length, currentCardCount);
+    
     console.log(`Current cards: ${currentCardCount}, Collected media: ${media.length}, Last: ${lastCardCount}`);
     
     // Update progress with collected media count (more accurate than card count)
@@ -638,7 +787,8 @@ async function scrollAndCollectMedia(type) {
   }
   
   // One final collection pass
-  await collectMediaFromVisibleCards(type, media, seen);
+  const finalCardCount = document.querySelectorAll(SELECTORS.CARD).length;
+  await collectMediaFromVisibleCards(type, media, seen, media.length, finalCardCount);
   
   // Scroll back to top
   console.log('Scrolling back to top');
@@ -654,8 +804,10 @@ async function scrollAndCollectMedia(type) {
  * @param {string} type - Type of download
  * @param {Array} media - Array to add media to
  * @param {Set} seen - Set of already seen URLs
+ * @param {number} currentIndex - Current card index for progress
+ * @param {number} totalCards - Total cards for progress
  */
-async function collectMediaFromVisibleCards(type, media, seen) {
+async function collectMediaFromVisibleCards(type, media, seen, currentIndex = 0, totalCards = 0) {
   const cards = document.querySelectorAll(SELECTORS.CARD);
   
   for (const card of cards) {
@@ -677,7 +829,7 @@ async function collectMediaFromVisibleCards(type, media, seen) {
     }
     
     // Extract video
-    if (type === 'saveVideos' || type === 'saveBoth') {
+    if (type === 'saveVideos' || type === 'saveBoth' || shouldUpscale) {
       const video = card.querySelector(SELECTORS.VIDEO);
       if (video && video.src) {
         const url = video.src.split('?')[0];
@@ -706,6 +858,63 @@ async function collectMediaFromVisibleCards(type, media, seen) {
       }
     }
   }
+}
+
+/**
+ * Handles video upscaling without downloading
+ */
+async function handleUpscale() {
+  console.log('Starting handleUpscale');
+  
+  // Check if we're on the favorites page
+  const cards = document.querySelectorAll(SELECTORS.CARD);
+  if (cards.length === 0) {
+    throw new Error('No media cards found. Make sure you are on the favorites page.');
+  }
+  
+  ProgressModal.show('Upscaling Videos', 'This may take several minutes...');
+  
+  // Scroll and collect videos to upscale
+  const videosToUpscale = await scrollAndCollectVideosForUpscale();
+  
+  if (videosToUpscale.length === 0) {
+    ProgressModal.hide();
+    alert('No videos found that need upscaling.');
+    return;
+  }
+  
+  ProgressModal.update(10, `Found ${videosToUpscale.length} videos to upscale`);
+  
+  let successCount = 0;
+  let skipCount = 0;
+  
+  for (let i = 0; i < videosToUpscale.length; i++) {
+    // Check for cancellation
+    if (ProgressModal.isCancelled()) {
+      console.log(`Upscale operation cancelled at video ${i + 1}`);
+      ProgressModal.hide();
+      alert(`Operation cancelled. ${successCount} of ${videosToUpscale.length} videos were upscaled.`);
+      return;
+    }
+    
+    const videoId = videosToUpscale[i];
+    const progress = 10 + ((i / videosToUpscale.length) * 90);
+    ProgressModal.update(progress, `Upscaling video ${i + 1}/${videosToUpscale.length}... (may take ~30s)`);
+    
+    const upscaled = await upscaleVideo(videoId);
+    if (upscaled) {
+      successCount++;
+      console.log(`Successfully upscaled video ${i + 1}`);
+      // Wait for upscale to complete
+      await new Promise(resolve => setTimeout(resolve, TIMING.UPSCALE_TIMEOUT));
+    } else {
+      skipCount++;
+      console.log(`Skipped video ${i + 1}`);
+    }
+  }
+  
+  ProgressModal.hide();
+  alert(`Finished! Successfully upscaled ${successCount} videos${skipCount > 0 ? `, ${skipCount} skipped or already HD` : ''}. Refresh to see changes.`);
 }
 
 /**

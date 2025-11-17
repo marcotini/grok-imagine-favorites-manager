@@ -15,6 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('saveImages').addEventListener('click', () => sendAction('saveImages'));
   document.getElementById('saveVideos').addEventListener('click', () => sendAction('saveVideos'));
   document.getElementById('saveBoth').addEventListener('click', () => sendAction('saveBoth'));
+  document.getElementById('upscaleVideos').addEventListener('click', () => sendAction('upscaleVideos'));
   
   // Manage actions
 document.getElementById('unsaveBoth').addEventListener('click', () => sendAction('unsaveBoth'));
