@@ -22,11 +22,37 @@ A modern Chrome extension to download and manage your favorited Grok Imagine ima
 
 ## Installation
 
-1. Open Chrome and navigate to `chrome://extensions/`
-2. Enable "Developer mode" (toggle in top-right)
-3. Click "Load unpacked"
-4. Select the folder containing this extension
-5. Pin the extension to your toolbar for easy access
+### Step 1: Clone the Repository
+
+First, clone this repository to your local machine:
+
+```bash
+git clone https://github.com/brndnsmth/grok-imagine-favorites-manager.git
+```
+
+This will create a folder called `grok-imagine-favorites-manager` containing all the extension files.
+
+Alternatively, you can download the repository as a ZIP file:
+1. Go to https://github.com/brndnsmth/grok-imagine-favorites-manager
+2. Click the green "Code" button
+3. Select "Download ZIP"
+4. Extract the ZIP file to a folder on your computer
+
+### Step 2: Load the Extension in Chrome
+
+1. Open Google Chrome
+2. Navigate to `chrome://extensions/` (or go to Menu → Extensions → Manage Extensions)
+3. Enable **Developer mode** by toggling the switch in the top-right corner
+4. Click the **"Load unpacked"** button that appears
+5. Navigate to and select the `grok-imagine-favorites-manager` folder you cloned/downloaded
+6. The extension should now appear in your extensions list
+
+### Step 3: Pin the Extension (Optional but Recommended)
+
+1. Click the puzzle piece icon in Chrome's toolbar (Extensions menu)
+2. Find "Grok Imagine Favorites Manager" in the list
+3. Click the pin icon next to it
+4. The extension icon will now appear in your toolbar for easy access
 
 ## Usage
 
