@@ -9,7 +9,7 @@ A modern Chrome extension to download and manage your favorited Grok Imagine ima
 ## Features
 
 - Download all images and/or videos from your favorites with automatic scrolling
-- Upscale standard videos to HD quality (⚠️ work in progress)
+- Upscale standard videos to HD quality with fast parallel requests
 - Unfavorite items selectively (videos, images, or both)
 - Automatic filename matching (videos use image names)
 - On-screen progress modal with live updates
@@ -41,7 +41,7 @@ The extension will automatically scroll and load all favorites before processing
 - **Download Videos Only** - Downloads only videos (named to match images)
 
 **Video Tools:**
-- **Upscale Videos to HD** - ⚠️ *Work in Progress* - Attempts to upscale standard videos to HD quality (may take ~30 seconds per video)
+- **Upscale Videos to HD** - Requests upscaling for all standard videos to HD quality (requests are staggered and complete in background)
 
 <img width="405" height="253" alt="Screenshot 2025-11-17 at 11 38 04 AM" src="https://github.com/user-attachments/assets/f32d2142-9bb5-46ee-ae6c-801c98d4996f" />
 
@@ -73,6 +73,7 @@ Videos are automatically named to match their corresponding image files (using t
 
 - Downloads are rate-limited to approximately 3 per second to avoid browser issues
 - Unfavorite requests are delayed by 150ms between calls
+- Upscale requests are staggered with 300ms delays and run in parallel
 - Progress tracking displays in an on-screen modal with visual progress bar
 - Content script automatically scrolls to load all lazy-loaded content
 - Virtual scrolling is handled by collecting items during scroll process
@@ -86,7 +87,8 @@ Videos are automatically named to match their corresponding image files (using t
 - Keep the tab open while operations run to ensure completion
 - Progress is shown in an on-screen modal with cancellation option
 - Unfavorite operations work by calling `/rest/media/post/unlike` with the post id
-- **Upscale feature is experimental** - Uses `/rest/media/video/upscale` API and may not work for all videos
+- Upscale requests are sent to `/rest/media/video/upscale` and complete in the background
+- Refresh the page after a few minutes to see newly upscaled HD videos
 - Check browser console (F12) for detailed logs during operations
 
 ## Progress Tracking
