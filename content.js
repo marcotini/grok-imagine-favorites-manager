@@ -479,7 +479,7 @@ async function scrollAndCollectPostIds(filterFn) {
   }
   
   const seenPostIds = new Set();
-  let lastCardCount = 0;
+  let lastUniqueCount = 0;
   let unchangedCount = 0;
   const maxUnchangedAttempts = 5;
   
@@ -529,18 +529,19 @@ async function scrollAndCollectPostIds(filterFn) {
     });
     
     const currentCardCount = items.length;
-    console.log(`Current cards: ${currentCardCount}, Collected IDs: ${seenPostIds.size}, Last: ${lastCardCount}`);
+    const currentUniqueCount = seenPostIds.size;
+    console.log(`Current cards: ${currentCardCount}, Collected IDs: ${currentUniqueCount}, Last unique: ${lastUniqueCount}`);
     
     const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
-    ProgressModal.update(scrollProgress, `Collecting items... Found ${seenPostIds.size} so far`);
+    ProgressModal.update(scrollProgress, `Collecting items... Found ${currentUniqueCount} so far`);
     
-    if (currentCardCount === lastCardCount) {
+    if (currentUniqueCount === lastUniqueCount) {
       unchangedCount++;
-      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+      console.log(`No new unique items found (${unchangedCount}/${maxUnchangedAttempts})`);
     } else {
       unchangedCount = 0;
-      lastCardCount = currentCardCount;
-      console.log(`New cards found! Total collected: ${seenPostIds.size}`);
+      lastUniqueCount = currentUniqueCount;
+      console.log(`New items found! Total collected: ${currentUniqueCount}`);
     }
     
     // Scroll down by viewport height
@@ -593,7 +594,7 @@ async function scrollToLoadAll() {
     console.log('Found custom scroll container:', scrollContainer);
   }
   
-  let lastCardCount = 0;
+  let lastUniqueCount = 0;
   let unchangedCount = 0;
   const maxUnchangedAttempts = 5;
   const seenCards = new Set();
@@ -619,7 +620,7 @@ async function scrollToLoadAll() {
     
     const currentCardCount = cards.length;
     const totalUnique = seenCards.size;
-    console.log(`Current cards in DOM: ${currentCardCount}, Total unique seen: ${totalUnique}, Last: ${lastCardCount}`);
+    console.log(`Current cards in DOM: ${currentCardCount}, Total unique seen: ${totalUnique}, Last unique: ${lastUniqueCount}`);
     
     // Check for cancellation
     if (ProgressModal.isCancelled()) {
@@ -630,13 +631,13 @@ async function scrollToLoadAll() {
     const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
     ProgressModal.update(scrollProgress, `Loading favorites... Found ${totalUnique} items so far`);
     
-    if (currentCardCount === lastCardCount) {
+    if (totalUnique === lastUniqueCount) {
       unchangedCount++;
-      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+      console.log(`No new unique items found (${unchangedCount}/${maxUnchangedAttempts})`);
     } else {
       unchangedCount = 0;
-      lastCardCount = currentCardCount;
-      console.log(`New cards found! Total unique: ${totalUnique}`);
+      lastUniqueCount = totalUnique;
+      console.log(`New unique items found! Total: ${totalUnique}`);
     }
     
     // Scroll down by viewport height
@@ -689,7 +690,7 @@ async function scrollAndCollectVideosForUpscale() {
   
   const videoIds = [];
   const seen = new Set();
-  let lastCardCount = 0;
+  let lastUniqueCount = 0;
   let unchangedCount = 0;
   const maxUnchangedAttempts = 5;
   
@@ -737,18 +738,19 @@ async function scrollAndCollectVideosForUpscale() {
     }
     
     const currentCardCount = cards.length;
-    console.log(`Current cards: ${currentCardCount}, Videos to upscale: ${videoIds.length}, Last: ${lastCardCount}`);
+    const currentUniqueCount = videoIds.length;
+    console.log(`Current cards: ${currentCardCount}, Videos to upscale: ${currentUniqueCount}, Last unique: ${lastUniqueCount}`);
     
     const scrollProgress = Math.min(10, (unchangedCount / maxUnchangedAttempts) * 10);
-    ProgressModal.update(scrollProgress, `Collecting videos... Found ${videoIds.length} to upscale`);
+    ProgressModal.update(scrollProgress, `Collecting videos... Found ${currentUniqueCount} to upscale`);
     
-    if (currentCardCount === lastCardCount) {
+    if (currentUniqueCount === lastUniqueCount) {
       unchangedCount++;
-      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+      console.log(`No new unique videos found (${unchangedCount}/${maxUnchangedAttempts})`);
     } else {
       unchangedCount = 0;
-      lastCardCount = currentCardCount;
-      console.log(`New cards found! Videos to upscale: ${videoIds.length}`);
+      lastUniqueCount = currentUniqueCount;
+      console.log(`New videos found! Total to upscale: ${currentUniqueCount}`);
     }
     
     // Scroll down by viewport height
@@ -806,7 +808,7 @@ async function scrollAndCollectMedia(type) {
   
   const media = [];
   const seen = new Set();
-  let lastCardCount = 0;
+  let lastUniqueCount = 0;
   let unchangedCount = 0;
   const maxUnchangedAttempts = 5;
   
@@ -830,19 +832,20 @@ async function scrollAndCollectMedia(type) {
     const currentCardCount = document.querySelectorAll(SELECTORS.CARD).length;
     await collectMediaFromVisibleCards(type, media, seen, media.length, currentCardCount);
     
-    console.log(`Current cards: ${currentCardCount}, Collected media: ${media.length}, Last: ${lastCardCount}`);
+    const currentUniqueCount = media.length;
+    console.log(`Current cards: ${currentCardCount}, Collected media: ${currentUniqueCount}, Last unique: ${lastUniqueCount}`);
     
     // Update progress with collected media count (more accurate than card count)
     const scrollProgress = Math.min(80, (unchangedCount / maxUnchangedAttempts) * 80);
-    ProgressModal.update(scrollProgress, `Collecting media... Found ${media.length} items so far`);
+    ProgressModal.update(scrollProgress, `Collecting media... Found ${currentUniqueCount} items so far`);
     
-    if (currentCardCount === lastCardCount) {
+    if (currentUniqueCount === lastUniqueCount) {
       unchangedCount++;
-      console.log(`No new cards loaded (${unchangedCount}/${maxUnchangedAttempts})`);
+      console.log(`No new unique media found (${unchangedCount}/${maxUnchangedAttempts})`);
     } else {
       unchangedCount = 0;
-      lastCardCount = currentCardCount;
-      console.log(`New cards found! Collected: ${media.length}`);
+      lastUniqueCount = currentUniqueCount;
+      console.log(`New media found! Collected: ${currentUniqueCount}`);
     }
     
     // Scroll down by viewport height
