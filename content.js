@@ -8,6 +8,7 @@ const SELECTORS = {
   CARD: '[role="listitem"] .relative.group\\/media-post-masonry-card',
   IMAGE: 'img[alt*="Generated"]',
   VIDEO: 'video[src*="generated_video"]',
+  VIDEO_INDICATOR: 'svg[data-icon="play"]', // Play button overlay indicates video
   UNSAVE_BUTTON: 'button[aria-label="Unsave"]',
   LIST_ITEM: '[role="listitem"]'
 };
@@ -292,15 +293,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         await handleUpscale();
       } else if (action.startsWith('save')) {
         await handleSave(action);
-      } else if (action.startsWith('unsave')) {
-        await handleUnsave(action);
+      } else if (action === 'unsaveAll') {
+        await handleUnsaveAll();
       }
     } catch (error) {
       console.error('Error handling action:', error);
       ProgressModal.hide();
       
-      // Only show alert if not cancelled
-      if (!error.message.includes('cancelled')) {
+      // Show refresh prompt for both errors and cancellations
+      if (error.message.includes('cancelled')) {
+        const shouldRefresh = confirm('Operation cancelled.\n\nClick OK to refresh the page.');
+        if (shouldRefresh) {
+          window.location.reload();
+        }
+      } else {
         const shouldRefresh = confirm(`Error: ${error.message}\n\nClick OK to refresh the page.`);
         if (shouldRefresh) {
           window.location.reload();
@@ -519,56 +525,60 @@ async function scrollAndCollectPostIds(filterFn) {
     let imagesInBatch = 0;
     
     cards.forEach((card) => {
-      // A video exists if there's a <video> element with the specific selector
-      const hasVideo = !!card.querySelector(SELECTORS.VIDEO);
-      const hasImage = !!card.querySelector(SELECTORS.IMAGE);
+      // Extract post ID from image (every post has an image)
+      let postId = null;
+      const img = card.querySelector(SELECTORS.IMAGE);
+      if (img && img.src) {
+        const match = img.src.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+        if (match && match[1]) {
+          postId = match[1];
+        }
+      }
       
-      if (hasVideo) videosInBatch++;
+      // Check if this post has a video by looking for video element with matching UUID
+      let hasVideo = false;
+      const video = card.querySelector(SELECTORS.VIDEO);
+      if (video && video.src && postId) {
+        const videoMatch = video.src.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+        if (videoMatch && videoMatch[1] === postId) {
+          hasVideo = true;
+          videosInBatch++;
+        }
+      }
+      
+      const hasImage = !!img;
+      
       if (hasImage) imagesInBatch++;
       
-      // Extract post ID from video or image
-      let postId = null;
-      
-      // Try video URL first if video exists
-      if (hasVideo) {
-        const video = card.querySelector(SELECTORS.VIDEO);
-        if (video && video.src) {
-          const match = video.src.match(/\/generated\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\//i);
-          if (match && match[1]) {
-            postId = match[1];
-          }
-        }
-      }
-      
-      // If no postId yet, try image URL
-      if (!postId && hasImage) {
-        const img = card.querySelector(SELECTORS.IMAGE);
-        if (img && img.src) {
-          let match = img.src.match(/\/generated\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\//i);
-          if (match && match[1]) {
-            postId = match[1];
-          } else {
-            match = img.src.match(/\/users\/[a-f0-9-]+\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})\/content/i);
-            if (match && match[1]) {
-              postId = match[1];
-            } else {
-              match = img.src.match(/\/images\/([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i);
-              if (match && match[1]) {
-                postId = match[1];
-              }
-            }
-          }
-        }
-      }
-      
-      // Store the item data (will overwrite if seen multiple times due to virtual scroll)
+      // Store the item data - track if we've EVER seen a video for this post
       if (postId) {
-        allItemsData.set(postId, { hasVideo, hasImage });
+        const existing = allItemsData.get(postId);
+        if (existing) {
+          // If we've seen this post before, keep video=true if either occurrence had a video
+          allItemsData.set(postId, { 
+            hasVideo: existing.hasVideo || hasVideo, 
+            hasImage: existing.hasImage || hasImage 
+          });
+          if (hasVideo && !existing.hasVideo) {
+            console.log(`Post ${postId.substring(0, 8)}... NOW detected as having video`);
+          }
+        } else {
+          allItemsData.set(postId, { hasVideo, hasImage });
+        }
       }
     });
     
     const currentScrollHeight = scrollContainer.scrollHeight;
     console.log(`Current cards: ${cards.length}, Videos in view: ${videosInBatch}, Images in view: ${imagesInBatch}, Total collected: ${allItemsData.size}, ScrollHeight: ${currentScrollHeight}`);
+    
+    // Log a sample of what we're detecting
+    if (allItemsData.size <= 10) {
+      console.log('Sample of detected items:', Array.from(allItemsData.entries()).slice(0, 5).map(([id, data]) => ({
+        id: id.substring(0, 8) + '...',
+        hasVideo: data.hasVideo,
+        hasImage: data.hasImage
+      })));
+    }
     
     // Check if scroll height has changed (means more content loaded)
     if (currentScrollHeight === previousScrollHeight) {
@@ -1247,31 +1257,27 @@ async function handleSave(type) {
 }
 
 /**
- * Handles unfavorite operations
- * @param {string} type - Type of unfavorite operation
+ * Handles unfavorite all operation
  */
-async function handleUnsave(type) {
-  if (type === 'unsaveBoth') {
-    await handleUnsaveBoth();
-  } else if (type === 'unsaveImages') {
-    await handleUnsaveImages();
-  } else if (type === 'unsaveVideos') {
-    await handleUnsaveVideos();
+async function handleUnsaveAll() {
+  ProgressModal.show('Unfavoriting All Items', 'Collecting all media...');
+  
+  // Collect ALL media just like download does
+  const allMedia = await scrollAndCollectMedia('saveBoth');
+  
+  console.log(`Collected ${allMedia.length} total media files`);
+  
+  // Extract unique post IDs (each post has at least an image, maybe a video too)
+  const postIdsSet = new Set();
+  for (const item of allMedia) {
+    const match = item.url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    if (match && match[1]) {
+      postIdsSet.add(match[1]);
+    }
   }
-}
-
-/**
- * Handles unfavoriting items with both video and image using API calls
- */
-async function handleUnsaveBoth() {
-  // Scroll and collect post IDs for ALL items (images and videos)
-  ProgressModal.show('Unfavoriting All Items', 'Loading all favorites...');
   
-  const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
-    return hasImage; // Unfavorite all items (all items have images)
-  });
-  
-  console.log(`Found ${postIds.length} items to unfavorite`);
+  const postIds = Array.from(postIdsSet);
+  console.log(`Found ${postIds.length} unique posts to unfavorite`);
   
   if (postIds.length === 0) {
     ProgressModal.hide();
@@ -1328,138 +1334,3 @@ async function handleUnsaveBoth() {
   }
 }
 
-/**
- * Handles unfavoriting single image items using API calls
- */
-async function handleUnsaveImages() {
-  // Scroll and collect post IDs for image-only items
-  ProgressModal.show('Unfavoriting Single Images', 'Loading all favorites...');
-  
-  const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
-    return !hasVideo && hasImage;
-  });
-  
-  console.log(`Found ${postIds.length} items with single images only`);
-  
-  if (postIds.length === 0) {
-    ProgressModal.hide();
-    const shouldRefresh = confirm('No single image items found.\n\nClick OK to refresh the page.');
-    if (shouldRefresh) {
-      window.location.reload();
-    }
-    return;
-  }
-  
-  const estimatedTime = Math.ceil(postIds.length * TIMING.UNFAVORITE_DELAY / 1000);
-  ProgressModal.update(0, `Found ${postIds.length} items. Starting unfavorite process (${estimatedTime}s)...`);
-  
-  let successCount = 0;
-  let failCount = 0;
-  
-  for (let i = 0; i < postIds.length; i++) {
-    // Check for cancellation
-    if (ProgressModal.isCancelled()) {
-      console.log(`Unfavorite operation cancelled at item ${i + 1}`);
-      ProgressModal.hide();
-      const shouldRefresh = confirm(`Operation cancelled. ${successCount} of ${postIds.length} items were unfavorited.\n\nClick OK to refresh the page.`);
-      if (shouldRefresh) {
-        window.location.reload();
-      }
-      return;
-    }
-    
-    try {
-      const success = await unlikePost(postIds[i]);
-      if (success) {
-        successCount++;
-        console.log(`Unfavorited item ${i + 1} of ${postIds.length}`);
-      } else {
-        failCount++;
-        console.warn(`Failed to unfavorite item ${i + 1}`);
-      }
-      
-      const progress = ((i + 1) / postIds.length) * 100;
-      ProgressModal.update(progress, `Unfavorited ${successCount} of ${postIds.length} items`);
-      
-      // Small delay between requests
-      await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
-    } catch (error) {
-      failCount++;
-      console.error(`Failed to unfavorite item ${i + 1}:`, error);
-    }
-  }
-  
-  ProgressModal.hide();
-  const shouldRefresh = confirm(`Finished! Successfully unfavorited ${successCount} items${failCount > 0 ? `, ${failCount} failed` : ''}.\n\nClick OK to refresh the page now (required to see changes and before next operation).`);
-  if (shouldRefresh) {
-    window.location.reload();
-  }
-}
-
-/**
- * Handles unfavoriting video items using API calls
- */
-async function handleUnsaveVideos() {
-  // Scroll and collect post IDs for video items (with or without images)
-  ProgressModal.show('Unfavoriting Videos', 'Loading all favorites...');
-  
-  const postIds = await scrollAndCollectPostIds((hasVideo, hasImage) => {
-    return hasVideo; // Any item with a video
-  });
-  
-  console.log(`Found ${postIds.length} items with videos`);
-  
-  if (postIds.length === 0) {
-    ProgressModal.hide();
-    const shouldRefresh = confirm('No video items found.\n\nClick OK to refresh the page.');
-    if (shouldRefresh) {
-      window.location.reload();
-    }
-    return;
-  }
-  
-  const estimatedTime = Math.ceil(postIds.length * TIMING.UNFAVORITE_DELAY / 1000);
-  ProgressModal.update(0, `Found ${postIds.length} items. Starting unfavorite process (${estimatedTime}s)...`);
-  
-  let successCount = 0;
-  let failCount = 0;
-  
-  for (let i = 0; i < postIds.length; i++) {
-    // Check for cancellation
-    if (ProgressModal.isCancelled()) {
-      console.log(`Unfavorite operation cancelled at item ${i + 1}`);
-      ProgressModal.hide();
-      const shouldRefresh = confirm(`Operation cancelled. ${successCount} of ${postIds.length} items were unfavorited.\n\nClick OK to refresh the page.`);
-      if (shouldRefresh) {
-        window.location.reload();
-      }
-      return;
-    }
-    
-    try {
-      const success = await unlikePost(postIds[i]);
-      if (success) {
-        successCount++;
-        console.log(`Unfavorited item ${i + 1} of ${postIds.length}`);
-      } else {
-        failCount++;
-        console.warn(`Failed to unfavorite item ${i + 1}`);
-      }
-      
-      const progress = ((i + 1) / postIds.length) * 100;
-      ProgressModal.update(progress, `Unfavorited ${successCount} of ${postIds.length} items`);
-      
-      // Small delay between requests
-      await new Promise(resolve => setTimeout(resolve, TIMING.UNFAVORITE_DELAY));
-    } catch (error) {
-      failCount++;
-      console.error(`Failed to unfavorite item ${i + 1}:`, error);
-    }
-  }
-  
-  ProgressModal.hide();
-  const shouldRefresh = confirm(`Finished! Successfully unfavorited ${successCount} items${failCount > 0 ? `, ${failCount} failed` : ''}.\n\nClick OK to refresh the page now (required to see changes and before next operation).`);
-  if (shouldRefresh) {
-    window.location.reload();
-  }
-}

@@ -31,7 +31,7 @@ A modern Chrome extension to download and manage your favorited Grok Imagine ima
 
 - Download all images and/or videos from your favorites with automatic scrolling
 - Upscale standard videos to HD quality with fast parallel requests
-- Unfavorite items selectively (videos, images, or both)
+- Unfavorite all items at once
 - Automatic filename matching (videos use image names)
 - On-screen progress modal with live updates
 - Cancel operations at any time
@@ -99,9 +99,7 @@ The extension will automatically scroll and load all favorites before processing
 <img width="406" height="302" alt="Screenshot 2025-11-18 at 4 12 48 PM" src="https://github.com/user-attachments/assets/73f260ed-7795-40f0-a1e9-c1db95dcdf1d" />
 
 **Manage:**
-- **Unfavorite (Images & Videos)** - Removes favorites that have both image and video formats
-- **Unfavorite (Images Only)** - Removes favorites that only have images (no video)
-- **Unfavorite (Videos Only)** - Removes all favorites that have videos (with or without images)
+- **Unfavorite All** - Removes all favorites from your collection
 
 **Utilities:**
 - **Cancel Current Operation** - Stops any running download or unfavorite operation

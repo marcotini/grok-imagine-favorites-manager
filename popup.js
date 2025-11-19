@@ -21,9 +21,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('upscaleVideos').addEventListener('click', () => sendAction('upscaleVideos'));
   
   // Manage actions
-document.getElementById('unsaveBoth').addEventListener('click', () => sendAction('unsaveBoth'));
-document.getElementById('unsaveImages').addEventListener('click', () => sendAction('unsaveImages'));
-document.getElementById('unsaveVideos').addEventListener('click', () => sendAction('unsaveVideos'));  // Utility actions
+  document.getElementById('unsaveAll').addEventListener('click', () => sendAction('unsaveAll'));
+  
+  // Utility actions
   document.getElementById('viewDownloads').addEventListener('click', openDownloadsPage);
   document.getElementById('downloadSettings').addEventListener('click', openDownloadSettings);
   document.getElementById('cancelOperation').addEventListener('click', cancelCurrentOperation);
@@ -51,7 +51,7 @@ function checkIfOnFavoritesPage() {
       // Disable all action buttons
       const actionButtons = [
         'saveImages', 'saveVideos', 'saveBoth', 'upscaleVideos',
-        'unsaveBoth', 'unsaveImages', 'unsaveVideos'
+        'unsaveAll'
       ];
       
       actionButtons.forEach(buttonId => {
@@ -105,13 +105,11 @@ function sendAction(action) {
           setTimeout(() => {
             chrome.tabs.sendMessage(tab.id, { action }, (response) => {
               // Ignore errors - content script handles the action asynchronously
-              if (chrome.runtime.lastError) {
-                // Only log if it's not the expected "no response" error
-                if (!chrome.runtime.lastError.message.includes('receiving end does not exist')) {
-                  console.warn('Message delivery issue:', chrome.runtime.lastError.message);
-                }
-              }
+              // No need to log anything, this is expected behavior
             });
+            
+            // Close the popup after sending the action
+            window.close();
           }, 100);
         } catch (error) {
           console.error('Failed to inject content script:', error);
@@ -121,13 +119,11 @@ function sendAction(action) {
         // Content script is already loaded, send the action
         chrome.tabs.sendMessage(tab.id, { action }, (response) => {
           // Ignore errors - content script handles the action asynchronously
-          if (chrome.runtime.lastError) {
-            // Only log if it's not the expected "no response" error
-            if (!chrome.runtime.lastError.message.includes('receiving end does not exist')) {
-              console.warn('Message delivery issue:', chrome.runtime.lastError.message);
-            }
-          }
+          // No need to log anything, this is expected behavior
         });
+        
+        // Close the popup after sending the action
+        window.close();
       }
     });
   });
